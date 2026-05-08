@@ -8,6 +8,7 @@ import (
 )
 
 const HistoryLimit = 50
+const ProtocolLogLimit = 200
 
 type LaunchConfig struct {
 	Adapter     string            `json:"adapter" msgpack:"adapter"`

@@ -133,6 +133,12 @@ func (a *ClientApp) Request(requestType string, payload map[string]any) error {
 	return err
 }
 
+func (a *ClientApp) SnapshotCopy() map[string]any {
+	a.mu.L.Lock()
+	defer a.mu.L.Unlock()
+	return cloneMap(a.snapshot)
+}
+
 func (a *ClientApp) RunCommand(command string, kwargs map[string]any) (map[string]any, error) {
 	baseline := stringValue(a.snapshot["updated_at"])
 	changed := func(snapshot map[string]any) bool { return stringValue(snapshot["updated_at"]) != baseline }
@@ -155,7 +161,21 @@ func (a *ClientApp) RunCommand(command string, kwargs map[string]any) (map[strin
 		path := stringValue(kwargs["path"])
 		line := intValue(kwargs["line"])
 		payload := map[string]any{"source": map[string]any{"path": path}, "breakpoints": []map[string]any{{"line": line}}}
-		_, snapshot, err := a.requestWait("breakpoint.set", payload, func(snapshot map[string]any) bool { return changed(snapshot) }, 5*time.Second, 10*time.Second)
+		_, snapshot, err := a.requestWait("breakpoint.set", payload, func(snapshot map[string]any) bool {
+			if !changed(snapshot) {
+				return false
+			}
+			for _, bp := range sliceMapValue(snapshot["breakpoints"]) {
+				candidate := intValue(bp["line"])
+				if candidate == line {
+					return true
+				}
+				if nested := mapValue(bp["breakpoint"]); intValue(nested["line"]) == line {
+					return true
+				}
+			}
+			return false
+		}, 5*time.Second, 10*time.Second)
 		return snapshot, err
 	case "clear-breaks":
 		payload := map[string]any{"source": map[string]any{"path": stringValue(kwargs["path"])}}
@@ -164,15 +184,15 @@ func (a *ClientApp) RunCommand(command string, kwargs map[string]any) (map[strin
 		}, 5*time.Second, 10*time.Second)
 		return snapshot, err
 	case "continue":
-		return a.waitLifecycleCommand("debug.continue", changed, []string{"running", "stopped", "terminated", "exited"})
+		return a.waitLifecycleCommand("debug.continue", changed, []string{"running", "stopped", "terminated", "exited"}, 10*time.Second)
 	case "pause":
-		return a.waitLifecycleCommand("debug.pause", changed, []string{"stopped", "terminated", "exited"})
+		return a.waitLifecycleCommand("debug.pause", changed, []string{"stopped", "terminated", "exited"}, 20*time.Second)
 	case "step":
-		return a.waitLifecycleCommand("debug.step", changed, []string{"running", "stopped", "terminated", "exited"})
+		return a.waitLifecycleCommand("debug.step", changed, []string{"running", "stopped", "terminated", "exited"}, 10*time.Second)
 	case "step-in":
-		return a.waitLifecycleCommand("debug.step_in", changed, []string{"running", "stopped", "terminated", "exited"})
+		return a.waitLifecycleCommand("debug.step_in", changed, []string{"running", "stopped", "terminated", "exited"}, 10*time.Second)
 	case "step-out":
-		return a.waitLifecycleCommand("debug.step_out", changed, []string{"running", "stopped", "terminated", "exited"})
+		return a.waitLifecycleCommand("debug.step_out", changed, []string{"running", "stopped", "terminated", "exited"}, 10*time.Second)
 	case "threads":
 		_, snapshot, err := a.requestWait("debug.threads", nil, func(snapshot map[string]any) bool {
 			return changed(snapshot) && (len(sliceMapValue(snapshot["threads"])) > 0 || terminal(snapshot))
@@ -199,22 +219,22 @@ func (a *ClientApp) RunCommand(command string, kwargs map[string]any) (map[strin
 		}, 5*time.Second, 20*time.Second)
 		return snapshot, err
 	case "stop":
-		return a.waitLifecycleCommand("session.stop", changed, []string{"terminated"})
+		return a.waitLifecycleCommand("session.stop", changed, []string{"terminated"}, 10*time.Second)
 	case "shutdown":
-		return a.waitLifecycleCommand("daemon.shutdown", changed, []string{"terminated"})
+		return a.waitLifecycleCommand("daemon.shutdown", changed, []string{"terminated"}, 10*time.Second)
 	default:
 		return nil, fmt.Errorf("Unsupported command: %s", command)
 	}
 }
 
-func (a *ClientApp) waitLifecycleCommand(requestType string, changed func(map[string]any) bool, lifecycles []string) (map[string]any, error) {
+func (a *ClientApp) waitLifecycleCommand(requestType string, changed func(map[string]any) bool, lifecycles []string, snapshotTimeout time.Duration) (map[string]any, error) {
 	allowed := map[string]bool{}
 	for _, lifecycle := range lifecycles {
 		allowed[lifecycle] = true
 	}
 	_, snapshot, err := a.requestWait(requestType, nil, func(snapshot map[string]any) bool {
 		return changed(snapshot) && allowed[stringValue(snapshot["lifecycle"])]
-	}, 5*time.Second, 20*time.Second)
+	}, 5*time.Second, snapshotTimeout)
 	return snapshot, err
 }
 
@@ -328,6 +348,52 @@ func snapshotFromPayload(payload map[string]any, fallback map[string]any) map[st
 		return mapValue(snapshot)
 	}
 	return fallback
+}
+
+func (a *ClientApp) LatestEvalResult() string {
+	snapshot := a.SnapshotCopy()
+	outputs := sliceMapValue(snapshot["recent_output"])
+	for i := len(outputs) - 1; i >= 0; i-- {
+		if stringValue(outputs[i]["category"]) == "eval" {
+			return stringValue(outputs[i]["output"])
+		}
+	}
+	return ""
+}
+
+func (a *ClientApp) LatestScopes() []map[string]any {
+	snapshot := a.SnapshotCopy()
+	return sliceMapValue(snapshot["scopes"])
+}
+
+func (a *ClientApp) LatestStackFrames() []map[string]any {
+	snapshot := a.SnapshotCopy()
+	return sliceMapValue(snapshot["stack_frames"])
+}
+
+func (a *ClientApp) LatestThreads() []map[string]any {
+	snapshot := a.SnapshotCopy()
+	return sliceMapValue(snapshot["threads"])
+}
+
+func (a *ClientApp) LatestVariables() []map[string]any {
+	snapshot := a.SnapshotCopy()
+	variables, _ := snapshot["variables"].(map[string][]map[string]any)
+	if len(variables) == 0 {
+		if raw := mapValue(snapshot["variables"]); len(raw) > 0 {
+			var last string
+			for key := range raw {
+				last = key
+			}
+			return sliceMapValue(raw[last])
+		}
+		return nil
+	}
+	var last string
+	for key := range variables {
+		last = key
+	}
+	return variables[last]
 }
 
 func terminal(snapshot map[string]any) bool {

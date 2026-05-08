@@ -116,6 +116,16 @@ func (s *Session) RecordOutput(output map[string]any) model.SessionSnapshot {
 	return s.snapshot
 }
 
+func (s *Session) RecordProtocol(entry map[string]any) model.SessionSnapshot {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	log := sliceMapValue(s.snapshot.Extra["protocol_log"])
+	log = model.AppendLimited(log, entry, model.ProtocolLogLimit)
+	s.snapshot.Extra["protocol_log"] = log
+	s.touchLocked()
+	return s.snapshot
+}
+
 func (s *Session) SessionID() string {
 	s.mu.Lock()
 	defer s.mu.Unlock()

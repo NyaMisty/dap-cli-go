@@ -28,7 +28,7 @@ func NewRootCommand() *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runWithApp(opts, "status", nil, func(app *ClientApp) error { _, err := app.RunCommand("status", nil); return err })
+			return runWithApp(opts, func(app *ClientApp) error { _, err := app.RunCommand("status", nil); return err })
 		},
 	}
 	cmd.PersistentFlags().StringVar(&opts.Root, "root", "", "project root")
@@ -44,11 +44,11 @@ func NewRootCommand() *cobra.Command {
 	}
 	cmd.AddCommand(statusCommand(opts))
 	cmd.AddCommand(attachCommand(opts))
-	cmd.AddCommand(simpleCommand(opts, "continue", "debug.continue"))
-	cmd.AddCommand(simpleCommand(opts, "pause", "debug.pause"))
-	cmd.AddCommand(simpleCommand(opts, "step", "debug.step"))
-	cmd.AddCommand(simpleCommand(opts, "step-in", "debug.step_in"))
-	cmd.AddCommand(simpleCommand(opts, "step-out", "debug.step_out"))
+	cmd.AddCommand(simpleCommand(opts, "continue"))
+	cmd.AddCommand(simpleCommand(opts, "pause"))
+	cmd.AddCommand(simpleCommand(opts, "step"))
+	cmd.AddCommand(simpleCommand(opts, "step-in"))
+	cmd.AddCommand(simpleCommand(opts, "step-out"))
 	cmd.AddCommand(threadsCommand(opts))
 	cmd.AddCommand(stackCommand(opts))
 	cmd.AddCommand(scopesCommand(opts))
@@ -56,8 +56,8 @@ func NewRootCommand() *cobra.Command {
 	cmd.AddCommand(evalCommand(opts))
 	cmd.AddCommand(breakCommand(opts))
 	cmd.AddCommand(clearBreaksCommand(opts))
-	cmd.AddCommand(simpleCommand(opts, "stop", "session.stop"))
-	cmd.AddCommand(simpleCommand(opts, "shutdown", "daemon.shutdown"))
+	cmd.AddCommand(simpleCommand(opts, "stop"))
+	cmd.AddCommand(simpleCommand(opts, "shutdown"))
 	cmd.AddCommand(monitorCommand(opts))
 	cmd.AddCommand(shellCommand(opts))
 	cmd.AddCommand(daemonCommand(opts))
@@ -66,7 +66,7 @@ func NewRootCommand() *cobra.Command {
 
 func statusCommand(opts *Options) *cobra.Command {
 	return &cobra.Command{Use: "status", RunE: func(cmd *cobra.Command, args []string) error {
-		return runWithApp(opts, "status", nil, func(app *ClientApp) error { _, err := app.RunCommand("status", nil); return err })
+		return runWithApp(opts, func(app *ClientApp) error { _, err := app.RunCommand("status", nil); return err })
 	}}
 }
 
@@ -88,7 +88,7 @@ func attachCommand(opts *Options) *cobra.Command {
 			attach["mode"] = "listen"
 			attach["listen"] = map[string]any{"host": listenHost, "port": listenPort}
 		}
-		return runWithApp(opts, "attach", map[string]any{"attach": attach}, func(app *ClientApp) error {
+		return runWithApp(opts, func(app *ClientApp) error {
 			_, err := app.RunCommand("attach", map[string]any{"attach": attach})
 			return err
 		})
@@ -106,7 +106,7 @@ func breakCommand(opts *Options) *cobra.Command {
 		if err != nil {
 			return err
 		}
-		return runWithApp(opts, "break", map[string]any{"path": args[0], "line": line}, func(app *ClientApp) error {
+		return runWithApp(opts, func(app *ClientApp) error {
 			snapshot, err := app.RunCommand("break", map[string]any{"path": args[0], "line": line})
 			if err == nil {
 				fmt.Println(renderBreakpoints(snapshot))
@@ -118,7 +118,7 @@ func breakCommand(opts *Options) *cobra.Command {
 
 func clearBreaksCommand(opts *Options) *cobra.Command {
 	return &cobra.Command{Use: "clear-breaks PATH", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
-		return runWithApp(opts, "clear-breaks", map[string]any{"path": args[0]}, func(app *ClientApp) error {
+		return runWithApp(opts, func(app *ClientApp) error {
 			_, err := app.RunCommand("clear-breaks", map[string]any{"path": args[0]})
 			return err
 		})
@@ -127,7 +127,7 @@ func clearBreaksCommand(opts *Options) *cobra.Command {
 
 func threadsCommand(opts *Options) *cobra.Command {
 	return &cobra.Command{Use: "threads", RunE: func(cmd *cobra.Command, args []string) error {
-		return runWithApp(opts, "threads", nil, func(app *ClientApp) error {
+		return runWithApp(opts, func(app *ClientApp) error {
 			snapshot, err := app.RunCommand("threads", nil)
 			if err == nil {
 				fmt.Println(renderThreads(snapshot))
@@ -139,7 +139,7 @@ func threadsCommand(opts *Options) *cobra.Command {
 
 func stackCommand(opts *Options) *cobra.Command {
 	return &cobra.Command{Use: "stack", RunE: func(cmd *cobra.Command, args []string) error {
-		return runWithApp(opts, "stack", nil, func(app *ClientApp) error {
+		return runWithApp(opts, func(app *ClientApp) error {
 			snapshot, err := app.RunCommand("stack", nil)
 			if err == nil {
 				fmt.Println(renderStack(snapshot))
@@ -151,7 +151,15 @@ func stackCommand(opts *Options) *cobra.Command {
 
 func scopesCommand(opts *Options) *cobra.Command {
 	return &cobra.Command{Use: "scopes", RunE: func(cmd *cobra.Command, args []string) error {
-		return runWithApp(opts, "scopes", nil, func(app *ClientApp) error { _, err := app.RunCommand("scopes", nil); return err })
+		return runWithApp(opts, func(app *ClientApp) error {
+			_, err := app.RunCommand("scopes", nil)
+			if err == nil {
+				for _, scope := range app.LatestScopes() {
+					fmt.Printf("%v: %v\n", scope["name"], scope["variablesReference"])
+				}
+			}
+			return err
+		})
 	}}
 }
 
@@ -161,8 +169,13 @@ func varsCommand(opts *Options) *cobra.Command {
 		if err != nil {
 			return err
 		}
-		return runWithApp(opts, "vars", map[string]any{"variables_reference": ref}, func(app *ClientApp) error {
+		return runWithApp(opts, func(app *ClientApp) error {
 			_, err := app.RunCommand("vars", map[string]any{"variables_reference": ref})
+			if err == nil {
+				for _, variable := range app.LatestVariables() {
+					fmt.Printf("%v=%v\n", variable["name"], variable["value"])
+				}
+			}
 			return err
 		})
 	}}
@@ -170,27 +183,30 @@ func varsCommand(opts *Options) *cobra.Command {
 
 func evalCommand(opts *Options) *cobra.Command {
 	return &cobra.Command{Use: "eval EXPRESSION", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
-		return runWithApp(opts, "eval", map[string]any{"expression": args[0]}, func(app *ClientApp) error {
+		return runWithApp(opts, func(app *ClientApp) error {
 			_, err := app.RunCommand("eval", map[string]any{"expression": args[0]})
+			if err == nil {
+				if result := app.LatestEvalResult(); result != "" {
+					fmt.Println(result)
+				}
+			}
 			return err
 		})
 	}}
 }
 
-func simpleCommand(opts *Options, name, requestType string) *cobra.Command {
+func simpleCommand(opts *Options, name string) *cobra.Command {
 	return &cobra.Command{Use: name, RunE: func(cmd *cobra.Command, args []string) error {
-		_ = requestType
-		return runWithApp(opts, name, nil, func(app *ClientApp) error { _, err := app.RunCommand(name, nil); return err })
+		return runWithApp(opts, func(app *ClientApp) error { _, err := app.RunCommand(name, nil); return err })
 	}}
 }
 
 func monitorCommand(opts *Options) *cobra.Command {
 	return &cobra.Command{Use: "monitor", RunE: func(cmd *cobra.Command, args []string) error {
-		root, app, err := connectApp(opts)
+		_, app, err := connectApp(opts)
 		if err != nil {
 			return err
 		}
-		_ = root
 		defer app.Close()
 		_, err = app.RunCommand("status", nil)
 		if err != nil {
@@ -265,9 +281,7 @@ func NewDaemonCommand() *cobra.Command {
 	return cmd
 }
 
-func runWithApp(opts *Options, command string, payload map[string]any, fn func(*ClientApp) error) error {
-	_ = command
-	_ = payload
+func runWithApp(opts *Options, fn func(*ClientApp) error) error {
 	_, app, err := connectApp(opts)
 	if err != nil {
 		return err

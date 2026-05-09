@@ -1,0 +1,54 @@
+project_name: dap-cli-go
+
+before:
+  hooks:
+    - go test ./...
+
+builds:
+  - id: dap
+    main: ./cmd/dap
+    binary: dap
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - windows
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+  - id: dap-daemon
+    main: ./cmd/dap-daemon
+    binary: dap-daemon
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - windows
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+
+archives:
+  - id: default
+    formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    name_template: >-
+      {{ .ProjectName }}_
+      {{ .Version }}_
+      {{- .Os }}_
+      {{- .Arch }}
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  sort: asc
+
+release:
+  github:
+    owner: NyaMisty
+    name: dap-cli-go

@@ -61,6 +61,7 @@ dap eval "1 + 1"
 dap shutdown
 ```
 
-## Release
+## CI and release
 
-Git tags matching `v*` trigger GitHub Actions + GoReleaser.
+- Every push to `master` / `main` builds `dap` and `dap-daemon`, runs `go test ./...`, and uploads build artifacts in GitHub Actions.
+- Git tags matching `v*` trigger GoReleaser to publish release archives and checksums.
